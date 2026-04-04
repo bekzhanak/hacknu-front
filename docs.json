@@ -1,0 +1,752 @@
+{
+    "openapi": "3.1.0",
+    "info": {
+        "title": "Canvas Agent Service",
+        "version": "2.0.0"
+    },
+    "paths": {
+        "/complete": {
+            "post": {
+                "tags": [
+                    "complete"
+                ],
+                "summary": "Autocomplete",
+                "description": "Autocomplete endpoint — triggered after idle. Runs with agent_0.",
+                "operationId": "autocomplete_complete_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CompleteRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CompleteResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/complete/action": {
+            "post": {
+                "tags": [
+                    "complete"
+                ],
+                "summary": "Complete Action",
+                "description": "Approve, reject, or edit a pending change.",
+                "operationId": "complete_action_complete_action_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CompleteActionRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CompleteActionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/agents/{room_id}": {
+            "get": {
+                "tags": [
+                    "agents"
+                ],
+                "summary": "List Agents",
+                "operationId": "list_agents_agents__room_id__get",
+                "parameters": [
+                    {
+                        "name": "room_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Room Id"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ListAgentsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "agents"
+                ],
+                "summary": "Create Agent",
+                "operationId": "create_agent_agents__room_id__post",
+                "parameters": [
+                    {
+                        "name": "room_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Room Id"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CreateAgentRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CreateAgentResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/{agent_id}/run": {
+            "post": {
+                "tags": [
+                    "agent"
+                ],
+                "summary": "Run Agent",
+                "operationId": "run_agent_agent__agent_id__run_post",
+                "parameters": [
+                    {
+                        "name": "agent_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Agent Id"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AgentRunRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AgentRunResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/agent/{agent_id}/messages": {
+            "get": {
+                "tags": [
+                    "agent"
+                ],
+                "summary": "Get Messages",
+                "operationId": "get_messages_agent__agent_id__messages_get",
+                "parameters": [
+                    {
+                        "name": "agent_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Agent Id"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "maximum": 200,
+                            "minimum": 1,
+                            "default": 50,
+                            "title": "Limit"
+                        }
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "default": 0,
+                            "title": "Offset"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/MessagesResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/health": {
+            "get": {
+                "summary": "Health",
+                "operationId": "health_health_get",
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "AgentInfo": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "title": "Id"
+                    },
+                    "name": {
+                        "type": "string",
+                        "title": "Name"
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": [
+                            "autocomplete",
+                            "chatbot"
+                        ],
+                        "title": "Type"
+                    },
+                    "is_default": {
+                        "type": "boolean",
+                        "title": "Is Default",
+                        "default": false
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "title": "Created At"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "name",
+                    "type",
+                    "created_at"
+                ],
+                "title": "AgentInfo"
+            },
+            "AgentRunRequest": {
+                "properties": {
+                    "room_id": {
+                        "type": "string",
+                        "title": "Room Id"
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "title": "Prompt"
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": [
+                            "generate",
+                            "query"
+                        ],
+                        "title": "Mode",
+                        "default": "generate"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "room_id",
+                    "prompt"
+                ],
+                "title": "AgentRunRequest"
+            },
+            "AgentRunResponse": {
+                "properties": {
+                    "change_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Change Id"
+                    },
+                    "operations_count": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Operations Count"
+                    },
+                    "reasoning": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Reasoning"
+                    },
+                    "answer": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Answer"
+                    },
+                    "referenced_shapes": {
+                        "anyOf": [
+                            {
+                                "items": {
+                                    "type": "string"
+                                },
+                                "type": "array"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Referenced Shapes"
+                    }
+                },
+                "type": "object",
+                "title": "AgentRunResponse"
+            },
+            "ChangeEntry": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "title": "Id"
+                    },
+                    "type": {
+                        "type": "string",
+                        "const": "change",
+                        "title": "Type",
+                        "default": "change"
+                    },
+                    "change_id": {
+                        "type": "string",
+                        "title": "Change Id"
+                    },
+                    "change_status": {
+                        "type": "string",
+                        "enum": [
+                            "pending",
+                            "approved",
+                            "rejected"
+                        ],
+                        "title": "Change Status"
+                    },
+                    "operations_summary": {
+                        "type": "string",
+                        "title": "Operations Summary"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "title": "Created At"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "change_id",
+                    "change_status",
+                    "operations_summary",
+                    "created_at"
+                ],
+                "title": "ChangeEntry"
+            },
+            "CompleteActionRequest": {
+                "properties": {
+                    "room_id": {
+                        "type": "string",
+                        "title": "Room Id"
+                    },
+                    "change_id": {
+                        "type": "string",
+                        "title": "Change Id"
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": [
+                            "approve",
+                            "reject",
+                            "edit"
+                        ],
+                        "title": "Action"
+                    },
+                    "edit_prompt": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Edit Prompt"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "room_id",
+                    "change_id",
+                    "action"
+                ],
+                "title": "CompleteActionRequest"
+            },
+            "CompleteActionResponse": {
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "title": "Status",
+                        "default": "ok"
+                    },
+                    "new_change_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "New Change Id"
+                    }
+                },
+                "type": "object",
+                "title": "CompleteActionResponse"
+            },
+            "CompleteRequest": {
+                "properties": {
+                    "room_id": {
+                        "type": "string",
+                        "title": "Room Id"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "room_id"
+                ],
+                "title": "CompleteRequest"
+            },
+            "CompleteResponse": {
+                "properties": {
+                    "change_id": {
+                        "type": "string",
+                        "title": "Change Id"
+                    },
+                    "operations_count": {
+                        "type": "integer",
+                        "title": "Operations Count"
+                    },
+                    "reasoning": {
+                        "type": "string",
+                        "title": "Reasoning"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "change_id",
+                    "operations_count",
+                    "reasoning"
+                ],
+                "title": "CompleteResponse"
+            },
+            "CreateAgentRequest": {
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "title": "Name"
+                    },
+                    "type": {
+                        "type": "string",
+                        "const": "chatbot",
+                        "title": "Type",
+                        "default": "chatbot"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "name"
+                ],
+                "title": "CreateAgentRequest"
+            },
+            "CreateAgentResponse": {
+                "properties": {
+                    "agent": {
+                        "$ref": "#/components/schemas/AgentInfo"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "agent"
+                ],
+                "title": "CreateAgentResponse"
+            },
+            "HTTPValidationError": {
+                "properties": {
+                    "detail": {
+                        "items": {
+                            "$ref": "#/components/schemas/ValidationError"
+                        },
+                        "type": "array",
+                        "title": "Detail"
+                    }
+                },
+                "type": "object",
+                "title": "HTTPValidationError"
+            },
+            "ListAgentsResponse": {
+                "properties": {
+                    "agents": {
+                        "items": {
+                            "$ref": "#/components/schemas/AgentInfo"
+                        },
+                        "type": "array",
+                        "title": "Agents"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "agents"
+                ],
+                "title": "ListAgentsResponse"
+            },
+            "MessagesResponse": {
+                "properties": {
+                    "messages": {
+                        "items": {
+                            "anyOf": [
+                                {
+                                    "$ref": "#/components/schemas/TextEntry"
+                                },
+                                {
+                                    "$ref": "#/components/schemas/ChangeEntry"
+                                }
+                            ]
+                        },
+                        "type": "array",
+                        "title": "Messages"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "messages"
+                ],
+                "title": "MessagesResponse"
+            },
+            "TextEntry": {
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "title": "Id"
+                    },
+                    "type": {
+                        "type": "string",
+                        "const": "text",
+                        "title": "Type",
+                        "default": "text"
+                    },
+                    "role": {
+                        "type": "string",
+                        "enum": [
+                            "user",
+                            "assistant"
+                        ],
+                        "title": "Role"
+                    },
+                    "content": {
+                        "type": "string",
+                        "title": "Content"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "title": "Created At"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "id",
+                    "role",
+                    "content",
+                    "created_at"
+                ],
+                "title": "TextEntry"
+            },
+            "ValidationError": {
+                "properties": {
+                    "loc": {
+                        "items": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "integer"
+                                }
+                            ]
+                        },
+                        "type": "array",
+                        "title": "Location"
+                    },
+                    "msg": {
+                        "type": "string",
+                        "title": "Message"
+                    },
+                    "type": {
+                        "type": "string",
+                        "title": "Error Type"
+                    },
+                    "input": {
+                        "title": "Input"
+                    },
+                    "ctx": {
+                        "type": "object",
+                        "title": "Context"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "loc",
+                    "msg",
+                    "type"
+                ],
+                "title": "ValidationError"
+            }
+        }
+    }
+}
