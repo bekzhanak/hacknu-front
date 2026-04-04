@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Production build output
+dist/
+
+# TypeScript build cache and generated config output
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# Local environment files
+.env
+.env.*
+!.env.example
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
