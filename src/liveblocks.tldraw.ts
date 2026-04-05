@@ -67,6 +67,7 @@ export type PendingChange = {
   id: string
   agentId: string
   status: 'pending'
+  requestedByColor?: string
   operations: Array<{
     op: 'add_shape' | 'update_shape' | 'delete_shape'
     shape?: CanvasShape
@@ -97,6 +98,10 @@ export type RoomMeta = {
   roomId: string
   roomName: string
   createdAt: string
+  autocompleteLease?: {
+    ownerId: string
+    expiresAt: number
+  } | null
 }
 
 type Storage = {

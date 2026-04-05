@@ -6,6 +6,8 @@ import 'tldraw/tldraw.css'
 import { ClientSideSuspense } from '@liveblocks/react'
 import type { RecordsDiff, UnknownRecord } from '@tldraw/store'
 import { toRichText } from '@tldraw/tlschema'
+import { ZERO_INDEX_KEY, getIndexAbove, type IndexKey } from '@tldraw/utils'
+import { generateKeyBetween } from 'jittered-fractional-indexing'
 import { useTldrawUser } from '@tldraw/editor'
 
 import {
@@ -254,6 +256,77 @@ function avatarLabel(name: unknown): string {
   return (str[0] ?? 'U').toUpperCase()
 }
 
+function tlColorFromUserColor(raw: unknown): TLColor {
+  if (typeof raw !== 'string') return 'violet'
+  const trimmed = raw.trim()
+  if (!trimmed) return 'violet'
+  // If already a TL color token, accept it.
+  if (
+    [
+      'black',
+      'grey',
+      'light-violet',
+      'violet',
+      'blue',
+      'light-blue',
+      'yellow',
+      'orange',
+      'green',
+      'light-green',
+      'light-red',
+      'red',
+      'white',
+    ].includes(trimmed)
+  ) {
+    return trimmed as TLColor
+  }
+
+  // Basic hex parsing -> hue bucket.
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(trimmed)
+  if (!m) return 'violet'
+  const hex = m[1]!
+  const r = parseInt(hex.slice(0, 2), 16) / 255
+  const g = parseInt(hex.slice(2, 4), 16) / 255
+  const b = parseInt(hex.slice(4, 6), 16) / 255
+  const max = Math.max(r, g, b)
+  const min = Math.min(r, g, b)
+  const d = max - min
+  if (d === 0) return max < 0.2 ? 'black' : max > 0.85 ? 'white' : 'grey'
+  let h = 0
+  if (max === r) h = ((g - b) / d) % 6
+  else if (max === g) h = (b - r) / d + 2
+  else h = (r - g) / d + 4
+  h = Math.round(h * 60)
+  if (h < 0) h += 360
+
+  if (h >= 330 || h < 20) return 'red'
+  if (h >= 20 && h < 50) return 'orange'
+  if (h >= 50 && h < 80) return 'yellow'
+  if (h >= 80 && h < 160) return 'green'
+  if (h >= 160 && h < 260) return 'blue'
+  return 'violet'
+}
+
+function ShareIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+      <polyline points="16 6 12 2 8 6" />
+      <line x1="12" y1="2" x2="12" y2="15" />
+    </svg>
+  )
+}
+
+function ExitIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
+    </svg>
+  )
+}
+
 type RoomShellProps = {
   roomId: string
   roomName: string
@@ -262,38 +335,63 @@ type RoomShellProps = {
 }
 
 function RoomShell({ roomId, roomName, user, navigate }: RoomShellProps) {
-  const initialStorage = useMemo(
-    () => ({
-      shapes: new LiveMap<string, CanvasShape>(),
-      pendingChanges: new LiveMap<string, PendingChange>(),
-      agents: new LiveMap<string, AgentInfo>([
-        ['agent-0', { id: 'agent-0', name: 'System Autocomplete' }],
-      ]),
-      agentChats: new LiveMap<string, LiveList<AgentChatMessage>>([
-        [
-          'agent-0',
-          new LiveList<AgentChatMessage>([]),
-        ],
-      ]),
-      meta: new LiveObject<RoomMeta>({
-        roomId,
-        roomName,
-        createdAt: new Date().toISOString(),
-      }),
-    }),
-    [roomId, roomName],
-  )
+	  const initialStorage = useMemo(
+	    () => ({
+	      shapes: new LiveMap<string, CanvasShape>(),
+	      pendingChanges: new LiveMap<string, PendingChange>(),
+	      agents: new LiveMap<string, AgentInfo>([['agent-0', { id: 'agent-0', name: 'System' }]]),
+	      agentChats: new LiveMap<string, LiveList<AgentChatMessage>>([
+	        [
+	          'agent-0',
+	          new LiveList<AgentChatMessage>([]),
+	        ],
+	      ]),
+	      meta: new LiveObject<RoomMeta>({
+	        roomId,
+	        roomName,
+	        createdAt: new Date().toISOString(),
+	      }),
+	    }),
+	    [roomId, roomName],
+	  )
 
   return (
     <RoomProvider
       id={roomId}
       initialPresence={{ name: user.username, color: user.color, cursor: null }}
       initialStorage={initialStorage}
-    >
-      <ClientSideSuspense fallback={<div style={{ padding: 24 }}>Loading room…</div>}>
-        <RoomInner roomId={roomId} roomName={roomName} navigate={navigate} />
-      </ClientSideSuspense>
-    </RoomProvider>
+	    >
+	      <ClientSideSuspense fallback={<div style={{ padding: 24 }}>Loading room…</div>}>
+	        <RoomInner roomId={roomId} roomName={roomName} navigate={navigate} />
+	      </ClientSideSuspense>
+	    </RoomProvider>
+	  )
+	}
+
+function AgentsPanelIcon({ open }: { open: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M9 4h10a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H9"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M5 4h4v16H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d={open ? 'M13 8l-3 4 3 4' : 'M11 8l3 4-3 4'}
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   )
 }
 
@@ -310,12 +408,13 @@ function RoomInner({
   const others = useOthers()
   const self = useSelf()
   const syncStatus = useSyncStatus()
-  const updateMyPresence = useUpdateMyPresence()
-  const [leftCollapsed, setLeftCollapsed] = useState(false)
-  const [rightSidebarWidth, setRightSidebarWidth] = useState<number>(() => {
-    if (typeof window === 'undefined') return 360
-    const raw = window.localStorage.getItem('hacknu.rightSidebarWidth')
-    const parsed = raw ? Number(raw) : 360
+	  const updateMyPresence = useUpdateMyPresence()
+	  const [leftCollapsed, setLeftCollapsed] = useState(false)
+	  const [rightSidebarOpen, setRightSidebarOpen] = useState(true)
+	  const [rightSidebarWidth, setRightSidebarWidth] = useState<number>(() => {
+	    if (typeof window === 'undefined') return 360
+	    const raw = window.localStorage.getItem('hacknu.rightSidebarWidth')
+	    const parsed = raw ? Number(raw) : 360
     const width = Number.isFinite(parsed) ? parsed : 360
     return Math.min(560, Math.max(280, width))
   })
@@ -328,15 +427,16 @@ function RoomInner({
   const [isUsersHover, setIsUsersHover] = useState(false)
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false)
   const [slashMenuIndex, setSlashMenuIndex] = useState(0)
+  const [systemAgentId, setSystemAgentId] = useState<string>('agent-0')
   const defaultBackendAgentIdRef = useRef<string | null>(null)
   const didBootstrapAgentsRef = useRef(false)
   const didLoadMessagesRef = useRef<Set<string>>(new Set())
 
-  const shapesMap = useStorage((root) => root.shapes)
-  const pendingChangesMap = useStorage((root) => root.pendingChanges)
-  const agentsMap = useStorage((root) => root.agents)
-  const isStorageLoaded = syncStatus === 'synchronized' && !!shapesMap && !!pendingChangesMap && !!agentsMap
-  const shapesCount = shapesMap ? shapesMap.size : 0
+	  const shapesMap = useStorage((root) => root.shapes)
+	  const pendingChangesMap = useStorage((root) => root.pendingChanges)
+	  const agentsMap = useStorage((root) => root.agents)
+	  const isStorageLoaded = syncStatus === 'synchronized' && !!shapesMap && !!pendingChangesMap && !!agentsMap
+	  const shapesCount = shapesMap ? shapesMap.size : 0
 
   // Force a stable locale to avoid noisy missing-translation warnings in tldraw's bundled ru locale.
   const tldrawUser = useTldrawUser({
@@ -363,14 +463,14 @@ function RoomInner({
     [],
   )
 
-  const agents = useMemo<AgentInfo[]>(() => {
-    if (!agentsMap) return [{ id: 'agent-0', name: 'System Autocomplete' }]
-    return Array.from(agentsMap.values())
-  }, [agentsMap])
+	  const agents = useMemo<AgentInfo[]>(() => {
+	    if (!agentsMap) return [{ id: 'agent-0', name: 'System' }]
+	    const list = Array.from(agentsMap.values())
+	    return list
+	  }, [agentsMap])
   const [activeAgentId, setActiveAgentId] = useState<string>('agent-0')
   const [chatInputValue, setChatInputValue] = useState('')
   const chatInputRef = useRef<HTMLInputElement | null>(null)
-  const fakeAgentReplyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const activeChatList = useStorage(
     (root) =>
       ((root as any).agentChats?.get(activeAgentId) as unknown) ?? null,
@@ -426,13 +526,23 @@ function RoomInner({
   }, [chatInputValue])
 
   const editorRef = useRef<Editor | null>(null)
+  const canvasHostRef = useRef<HTMLDivElement | null>(null)
+  const localClipboardRef = useRef<any | null>(null)
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const suppressAutocompleteUntilRef = useRef<number>(0)
   const isThinkingRef = useRef(false)
   const lastAutocompleteRef = useRef<number>(0)
   const lastCursorSentAtRef = useRef<number>(0)
 
   const pendingChangesRef = useRef<PendingChange[]>([])
   const awaitingBackendChangeRef = useRef<typeof awaitingBackendChange>(null)
+  const AUTOCOMPLETE_LEASE_TTL_MS = 20_000
+  const AWAITING_BACKEND_TTL_MS = 15_000
+  const autocompleteOwnerIdRef = useRef<string>(
+    `tab:${typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`}`,
+  )
 
   const pendingChanges = useMemo<PendingChange[]>(() => {
     if (!pendingChangesMap) return []
@@ -443,6 +553,7 @@ function RoomInner({
     id: string
     operationsCount: number
     reasoning: string
+    requestedAt: number
   } | null>(null)
 
   useEffect(() => {
@@ -460,23 +571,39 @@ function RoomInner({
     }
   }, [pendingChanges, awaitingBackendChange])
 
+  useEffect(() => {
+    if (!awaitingBackendChange) return
+    const timer = window.setTimeout(() => {
+      setAwaitingBackendChange((current) =>
+        current?.id === awaitingBackendChange.id ? null : current,
+      )
+    }, AWAITING_BACKEND_TTL_MS)
+    return () => window.clearTimeout(timer)
+  }, [awaitingBackendChange, AWAITING_BACKEND_TTL_MS])
+
   const EMPTY_RICH_TEXT: RichText = useMemo(() => ({ type: 'doc', content: [] }), [])
 
   const isOneOf = <T extends readonly string[]>(value: any, allowed: T): value is T[number] =>
     typeof value === 'string' && (allowed as readonly string[]).includes(value)
 
-  const randomIndexKey = () => {
-    // tldraw index keys are validated. In practice they look like "a2zWE9lG" (8 chars).
-    const raw = Math.random().toString(36).slice(2, 9).padEnd(7, '0')
-    return `a${raw}`.slice(0, 8)
+  const nextIndexKeyRef = useRef<IndexKey>(ZERO_INDEX_KEY)
+
+  const nextIndexKey = (): IndexKey => {
+    const next = getIndexAbove(nextIndexKeyRef.current)
+    nextIndexKeyRef.current = next
+    return next
   }
 
   const coerceIndexKey = (value: any): string => {
     if (typeof value === 'string') {
-      // Accept the common tldraw index format: 8 chars, starting with a letter.
-      if (/^[a-z][0-9A-Za-z]{7}$/.test(value)) return value
+      try {
+        generateKeyBetween(value, null)
+        return value
+      } catch {
+        // fall through
+      }
     }
-    return randomIndexKey()
+    return nextIndexKey()
   }
 
   const coerceAlign = (value: any, fallback: TLAlign = 'middle'): TLAlign => {
@@ -654,6 +781,8 @@ function RoomInner({
         isClosed: typeof props.isClosed === 'boolean' ? props.isClosed : false,
         isPen: typeof props.isPen === 'boolean' ? props.isPen : false,
         scale: coerceNumber(props.scale, 1),
+        scaleX: coerceNumber(props.scaleX, 1),
+        scaleY: coerceNumber(props.scaleY, 1),
       }
     }
 
@@ -668,7 +797,7 @@ function RoomInner({
     // Ensure active agent exists.
     if (agents.length === 0) return
     if (agents.some((a) => a.id === activeAgentId)) return
-    setActiveAgentId(agents.some((a) => a.id === 'agent-0') ? 'agent-0' : (agents[0]?.id ?? 'agent-0'))
+    setActiveAgentId(agents.some((a) => a.id === systemAgentId) ? systemAgentId : (agents[0]?.id ?? systemAgentId))
   }, [agents, activeAgentId])
 
   const toCanvasShape = (record: any): CanvasShape => {
@@ -709,6 +838,20 @@ function RoomInner({
     )
   }
 
+  const shouldTriggerAutocompleteFromDiff = (diff: RecordsDiff<UnknownRecord>): boolean => {
+    const hasShapeUpdate = Object.values(diff.updated as any).some((pair: any) => {
+      const rec = Array.isArray(pair) ? pair[1] : pair?.after ?? pair?.next ?? pair?.to ?? null
+      return !!rec && typeof rec.id === 'string' && rec.id.startsWith('shape:') && !rec?.meta?.ghost
+    })
+    if (hasShapeUpdate) return true
+
+    // Also allow new shape additions by user interactions (draw/create on canvas).
+    const hasShapeAdd = Object.values(diff.added as any).some((rec: any) => {
+      return !!rec && typeof rec.id === 'string' && rec.id.startsWith('shape:') && !rec?.meta?.ghost
+    })
+    return hasShapeAdd
+  }
+
   const syncEditorDiffToStorage = useMutation(({ storage }, diff: RecordsDiff<UnknownRecord>) => {
     const shapes = storage.get('shapes')
     const allowed = new Set(['geo', 'arrow', 'note', 'text', 'frame', 'line', 'draw', 'group'])
@@ -742,19 +885,52 @@ function RoomInner({
     storage.get('pendingChanges').delete(changeId)
   }, [])
 
-  const upsertAgentWithChat = useMutation(
-    (
-      { storage },
-      params: { agent: AgentInfo; initialMessage?: Omit<AgentChatMessage, 'agentId'> },
-    ) => {
-      storage.get('agents').set(params.agent.id, params.agent)
-      const chats =
-        storage.get('agentChats') ??
-        (() => {
-          const created = new LiveMap<string, LiveList<AgentChatMessage>>()
-          storage.set('agentChats', created as any)
-          return created
-        })()
+  const acquireAutocompleteLease = useMutation(
+    ({ storage }, ownerId: string) => {
+      const now = Date.now()
+      const meta = storage.get('meta')
+      const current = (meta.get('autocompleteLease') as RoomMeta['autocompleteLease']) ?? null
+      const canTake =
+        !current ||
+        !current.ownerId ||
+        typeof current.expiresAt !== 'number' ||
+        current.expiresAt <= now ||
+        current.ownerId === ownerId
+
+      if (!canTake) return false
+
+      meta.set('autocompleteLease', {
+        ownerId,
+        expiresAt: now + AUTOCOMPLETE_LEASE_TTL_MS,
+      })
+      return true
+    },
+    [AUTOCOMPLETE_LEASE_TTL_MS],
+  )
+
+  const releaseAutocompleteLease = useMutation(
+    ({ storage }, ownerId: string) => {
+      const meta = storage.get('meta')
+      const current = (meta.get('autocompleteLease') as RoomMeta['autocompleteLease']) ?? null
+      if (current?.ownerId !== ownerId) return
+      meta.set('autocompleteLease', null)
+    },
+    [],
+  )
+
+	  const upsertAgentWithChat = useMutation(
+	    (
+	      { storage },
+	      params: { agent: AgentInfo; initialMessage?: Omit<AgentChatMessage, 'agentId'> },
+	    ) => {
+	      storage.get('agents').set(params.agent.id, params.agent)
+	      const chats =
+	        storage.get('agentChats') ??
+	        (() => {
+	          const created = new LiveMap<string, LiveList<AgentChatMessage>>()
+	          storage.set('agentChats', created as any)
+	          return created
+	        })()
       if (!chats.get(params.agent.id)) {
         const initial =
           params.initialMessage ??
@@ -772,12 +948,31 @@ function RoomInner({
     [],
   )
 
-  const removeAgentFromStorage = useMutation(({ storage }, agentId: string) => {
-    if (agentId === 'agent-0') return
-    storage.get('agents').delete(agentId)
-    const chats = storage.get('agentChats')
-    chats?.delete(agentId)
-  }, [])
+	  const migrateSystemAgent = useMutation(
+	    ({ storage }, params: { fromId: string; toId: string; name: string }) => {
+	      const agentsMap = storage.get('agents')
+	      agentsMap.set(params.toId, { id: params.toId, name: params.name })
+	      if (params.fromId !== params.toId && agentsMap.get(params.fromId)) agentsMap.delete(params.fromId)
+
+	      const chats = storage.get('agentChats')
+	      if (chats) {
+        const fromChat = chats.get(params.fromId)
+        const toChat = chats.get(params.toId)
+        if (!toChat) {
+          if (fromChat) chats.set(params.toId, fromChat)
+          else chats.set(params.toId, new LiveList<AgentChatMessage>([]))
+        }
+        if (params.fromId !== params.toId && fromChat) chats.delete(params.fromId)
+      }
+    },
+    [],
+  )
+
+	  const removeAgentFromStorage = useMutation(({ storage }, agentId: string) => {
+	    storage.get('agents').delete(agentId)
+	    const chats = storage.get('agentChats')
+	    chats?.delete(agentId)
+	  }, [])
 
   const appendChatMessage = useMutation(({ storage }, message: AgentChatMessage) => {
     const chats =
@@ -797,12 +992,12 @@ function RoomInner({
     list.push(message)
   }, [])
 
-  const upsertAgentsFromApi = useMutation(({ storage }, agentsFromApi: Array<{ id: string; name: string }>) => {
-    const agentsMap = storage.get('agents')
-    for (const a of agentsFromApi) {
-      agentsMap.set(a.id, { id: a.id, name: a.name })
-    }
-  }, [])
+	  const upsertAgentsFromApi = useMutation(({ storage }, agentsFromApi: Array<{ id: string; name: string }>) => {
+	    const agentsMap = storage.get('agents')
+	    for (const a of agentsFromApi) {
+	      agentsMap.set(a.id, { id: a.id, name: a.name })
+	    }
+	  }, [])
 
   const setAgentChatIfEmpty = useMutation(
     (
@@ -857,27 +1052,35 @@ function RoomInner({
       try {
         const res = await apiListAgents(roomId)
         const defaultAgent = res.agents.find((a) => a.is_default) ?? null
-        if (defaultAgent?.id) defaultBackendAgentIdRef.current = defaultAgent.id
+        if (defaultAgent?.id) {
+          defaultBackendAgentIdRef.current = defaultAgent.id
+          const nextSystemId = defaultAgent.id
+          setSystemAgentId(nextSystemId)
+          migrateSystemAgent({
+            fromId: 'agent-0',
+            toId: nextSystemId,
+            name: 'System',
+          })
+          setActiveAgentId((cur) => (cur === 'agent-0' ? nextSystemId : cur))
+        }
 
-	        // Ensure system agent key exists locally for UI expectations.
-	        const normalized = res.agents.map((a) => {
-	          if (a.is_default) return { id: 'agent-0', name: a.name || 'System' }
-	          return { id: a.id, name: a.name }
-	        })
-	        upsertAgentsFromApi(normalized)
+        // Ensure system agent key exists locally for UI expectations.
+        const normalized = res.agents.map((a) => {
+          if (a.is_default) return { id: defaultAgent?.id ?? a.id, name: 'System' }
+          return { id: a.id, name: a.name }
+        })
+        upsertAgentsFromApi(normalized)
       } catch (e) {
         console.warn('Failed to bootstrap agents from API:', e)
       }
     })()
-  }, [isStorageLoaded, roomId, upsertAgentsFromApi])
+  }, [isStorageLoaded, migrateSystemAgent, roomId, upsertAgentsFromApi])
 
   useEffect(() => {
     if (!isStorageLoaded) return
     if (!agentApiEnabled()) return
 
     const localId = activeAgentId
-    // Do not load system chat history from backend. System chat is reserved for user [edit] prompts.
-    if (localId === 'agent-0') return
     if (didLoadMessagesRef.current.has(localId)) return
     didLoadMessagesRef.current.add(localId)
 
@@ -893,8 +1096,7 @@ function RoomInner({
 	              agentId: localId,
 	              role: 'agent',
 	              authorKey: localId,
-	              authorName:
-	                localId === 'agent-0' ? 'System' : agents.find((a) => a.id === localId)?.name ?? 'Agent',
+		              authorName: displayChatAgentName(localId),
 	              content: String(ch.operations_summary ?? 'Change'),
 	              createdAt: String(ch.created_at ?? new Date().toISOString()),
 	            }
@@ -906,13 +1108,11 @@ function RoomInner({
             agentId: localId,
             role,
             authorKey: role === 'agent' ? localId : String(self?.id ?? 'self'),
-	            authorName:
-	              role === 'agent'
-	                ? localId === 'agent-0'
-	                  ? 'System'
-	                  : agents.find((a) => a.id === localId)?.name ?? 'Agent'
-	                : typeof self?.presence?.name === 'string' && self.presence.name.trim()
-	                  ? self.presence.name.trim()
+		            authorName:
+		              role === 'agent'
+		                ? displayChatAgentName(localId)
+		                : typeof self?.presence?.name === 'string' && self.presence.name.trim()
+		                  ? self.presence.name.trim()
                   : 'User',
             content: String(t.content ?? ''),
             createdAt: String(t.created_at ?? new Date().toISOString()),
@@ -925,26 +1125,234 @@ function RoomInner({
     })()
   }, [activeAgentId, agents, isStorageLoaded, self?.id, self?.presence?.name, setAgentChatIfEmpty])
 
+  const splitPendingOperations = (change: PendingChange) => {
+    const addNodeOps = change.operations.filter(
+      (op) => op.op === 'add_shape' && op.shape && op.shape.type !== 'arrow',
+    )
+    const addArrowOps = change.operations.filter(
+      (op) => op.op === 'add_shape' && op.shape && op.shape.type === 'arrow',
+    )
+    const updateOps = change.operations.filter((op) => op.op === 'update_shape' && op.shapeId && op.updates)
+    const deleteOps = change.operations.filter((op) => op.op === 'delete_shape' && op.shapeId)
+    return { addNodeOps, addArrowOps, updateOps, deleteOps }
+  }
+
+  type AgentConnectionTerminal = {
+    shapeId: string
+    normalizedAnchor?: { x: number; y: number }
+    isExact?: boolean
+    isPrecise?: boolean
+    snap?: 'center' | 'edge-point' | 'edge' | 'none'
+  }
+
+  const parseAgentConnectionTerminal = (raw: any): AgentConnectionTerminal | null => {
+    if (!raw || typeof raw !== 'object') return null
+    const shapeId =
+      typeof raw.shapeId === 'string'
+        ? raw.shapeId
+        : typeof raw.toShapeId === 'string'
+          ? raw.toShapeId
+          : typeof raw.id === 'string'
+            ? raw.id
+            : null
+    if (!shapeId) return null
+    const anchor =
+      raw.normalizedAnchor && typeof raw.normalizedAnchor === 'object'
+        ? {
+            x: typeof raw.normalizedAnchor.x === 'number' ? raw.normalizedAnchor.x : 0.5,
+            y: typeof raw.normalizedAnchor.y === 'number' ? raw.normalizedAnchor.y : 0.5,
+          }
+        : undefined
+    const snap =
+      raw.snap === 'center' || raw.snap === 'edge-point' || raw.snap === 'edge' || raw.snap === 'none'
+        ? raw.snap
+        : undefined
+    return {
+      shapeId,
+      normalizedAnchor: anchor,
+      isExact: typeof raw.isExact === 'boolean' ? raw.isExact : undefined,
+      isPrecise: typeof raw.isPrecise === 'boolean' ? raw.isPrecise : undefined,
+      snap,
+    }
+  }
+
+  const getArrowBindingTerminalFromMeta = (
+    meta: any,
+    terminal: 'start' | 'end',
+  ): AgentConnectionTerminal | null => {
+    if (!meta || typeof meta !== 'object') return null
+    const conn = meta.agentConnection
+    if (!conn || typeof conn !== 'object') return null
+
+    const direct = parseAgentConnectionTerminal(conn[terminal])
+    if (direct) return direct
+
+    if (terminal === 'start') {
+      return parseAgentConnectionTerminal({
+        shapeId: conn.startShapeId ?? conn.sourceId ?? conn.fromId,
+        normalizedAnchor: conn.startNormalizedAnchor,
+        isExact: conn.startIsExact,
+        isPrecise: conn.startIsPrecise,
+        snap: conn.startSnap,
+      })
+    }
+
+    return parseAgentConnectionTerminal({
+      shapeId: conn.endShapeId ?? conn.targetId ?? conn.toId,
+      normalizedAnchor: conn.endNormalizedAnchor,
+      isExact: conn.endIsExact,
+      isPrecise: conn.endIsPrecise,
+      snap: conn.endSnap,
+    })
+  }
+
+  const createArrowBindingsFromMeta = (editor: Editor, arrowShape: CanvasShape) => {
+    if (arrowShape.type !== 'arrow') return
+    const start = getArrowBindingTerminalFromMeta(arrowShape.meta, 'start')
+    const end = getArrowBindingTerminalFromMeta(arrowShape.meta, 'end')
+    if (!start && !end) return
+
+    const tryCreate = () => {
+      const arrowId = String(arrowShape.id)
+      if (!editor.getShape(arrowId as any)) return false
+
+      const bindingPartials: any[] = []
+      const buildPartial = (terminal: 'start' | 'end', config: AgentConnectionTerminal | null) => {
+        if (!config) return
+        const toId = String(config.shapeId)
+        if (!editor.getShape(toId as any)) return
+        bindingPartials.push({
+          type: 'arrow',
+          fromId: arrowId,
+          toId,
+          props: {
+            terminal,
+            normalizedAnchor: config.normalizedAnchor ?? { x: 0.5, y: 0.5 },
+            isExact: config.isExact ?? false,
+            isPrecise: config.isPrecise ?? true,
+            snap: config.snap ?? 'edge',
+          },
+        })
+      }
+
+      buildPartial('start', start)
+      buildPartial('end', end)
+
+      if (bindingPartials.length === 0) return false
+      const existing = editor.getBindingsFromShape(arrowId as any, 'arrow')
+      if (existing.length > 0) editor.deleteBindings(existing as any)
+      editor.createBindings(bindingPartials)
+      return true
+    }
+
+    if (tryCreate()) return
+    // Delay once to allow referenced shapes to land in editor state.
+    window.setTimeout(() => {
+      tryCreate()
+    }, 120)
+  }
+
+  const applyPendingOperationsToEditor = (editor: Editor, change: PendingChange) => {
+    const { addNodeOps, addArrowOps, updateOps, deleteOps } = splitPendingOperations(change)
+
+    const nodeCreates = addNodeOps
+      .map((op) => op.shape)
+      .filter(Boolean)
+      .map((shape) =>
+        normalizeCanvasShape({
+          ...shape!,
+          opacity: 1,
+          isLocked: false,
+          meta: {
+            ...(shape!.meta ?? {}),
+          },
+        }),
+      )
+    const arrowCreates = addArrowOps
+      .map((op) => op.shape)
+      .filter(Boolean)
+      .map((shape) =>
+        normalizeCanvasShape({
+          ...shape!,
+          opacity: 1,
+          isLocked: false,
+          meta: {
+            ...(shape!.meta ?? {}),
+          },
+        }),
+      )
+
+    if (nodeCreates.length > 0) editor.createShapes(nodeCreates as any)
+    if (arrowCreates.length > 0) editor.createShapes(arrowCreates as any)
+
+    for (const op of updateOps) {
+      const shapeId = String(op.shapeId)
+      const current = editor.getShape(shapeId as any)
+      if (!current) continue
+      const next: any = { ...current, ...(op.updates as any) }
+      if (op.updates && op.updates.props && typeof op.updates.props === 'object') {
+        next.props = { ...(current as any).props, ...(op.updates as any).props }
+      }
+      if (op.updates && op.updates.meta && typeof op.updates.meta === 'object') {
+        next.meta = { ...(current as any).meta, ...(op.updates as any).meta }
+      }
+      editor.updateShape(next)
+    }
+
+    for (const arrow of arrowCreates) createArrowBindingsFromMeta(editor, arrow)
+
+    if (deleteOps.length > 0) {
+      editor.deleteShapes(deleteOps.map((op) => String(op.shapeId)) as any)
+    }
+  }
+
   const applyPendingOperationsToStorage = useMutation(({ storage }, change: PendingChange) => {
     const shapes = storage.get('shapes')
-    for (const op of change.operations) {
-      if (op.op === 'add_shape' && op.shape) {
-        shapes.set(op.shape.id, op.shape)
-      } else if (op.op === 'update_shape' && op.shapeId && op.updates) {
-        const current = shapes.get(op.shapeId)
-        if (!current) continue
-        const next: any = { ...current, ...op.updates }
-        if (op.updates.props && typeof op.updates.props === 'object') {
-          next.props = { ...(current as any).props, ...(op.updates as any).props }
-        }
-        if (op.updates.meta && typeof op.updates.meta === 'object') {
-          next.meta = { ...(current as any).meta, ...(op.updates as any).meta }
-        }
-        shapes.set(op.shapeId, next as CanvasShape)
-      } else if (op.op === 'delete_shape' && op.shapeId) {
-        shapes.delete(op.shapeId)
-      }
+    const { addNodeOps, addArrowOps, updateOps, deleteOps } = splitPendingOperations(change)
+
+    const commitAddedShape = (shape: CanvasShape) => {
+      const meta: any = { ...(shape.meta ?? {}) }
+      delete meta.isPending
+      delete meta.pendingChangeId
+      delete meta.requestedByColor
+      // Important: preserve `meta.agentConnection` for arrow binding recreation in approve flow.
+      const committed = normalizeCanvasShape({
+        ...shape,
+        opacity: 1,
+        isLocked: false,
+        meta,
+      })
+      shapes.set(committed.id, committed)
     }
+
+    for (const op of addNodeOps) {
+      if (op.op === 'add_shape' && op.shape) commitAddedShape(op.shape)
+    }
+    for (const op of addArrowOps) {
+      if (op.op === 'add_shape' && op.shape) commitAddedShape(op.shape)
+    }
+    for (const op of updateOps) {
+      if (op.op !== 'update_shape' || !op.shapeId || !op.updates) continue
+      const current = shapes.get(op.shapeId)
+      if (!current) continue
+      const next: any = { ...current, ...op.updates }
+      if (op.updates.props && typeof op.updates.props === 'object') {
+        next.props = { ...(current as any).props, ...(op.updates as any).props }
+      }
+      if (op.updates.meta && typeof op.updates.meta === 'object') {
+        next.meta = { ...(current as any).meta, ...(op.updates as any).meta }
+      }
+      if (!next.meta || typeof next.meta !== 'object') next.meta = {}
+      delete next.meta.isPending
+      delete next.meta.pendingChangeId
+      delete next.meta.requestedByColor
+      next.opacity = 1
+      shapes.set(op.shapeId, normalizeCanvasShape(next))
+    }
+    for (const op of deleteOps) {
+      if (op.op === 'delete_shape' && op.shapeId) shapes.delete(op.shapeId)
+    }
+
     storage.get('pendingChanges').delete(change.id)
   }, [])
 
@@ -982,6 +1390,13 @@ function RoomInner({
       if (toRemove.length > 0) editor.store.remove(toRemove as any)
     })
 
+    // Recreate arrow bindings from persisted shape metadata on every client.
+    // This keeps attachments consistent for concurrent viewers, not only the approver tab.
+    for (const shape of shapesMap.values()) {
+      if (shape.type !== 'arrow') continue
+      createArrowBindingsFromMeta(editor, shape)
+    }
+
     appliedShapesRef.current = nextSerialized
   }, [shapesMap, syncStatus])
 
@@ -990,44 +1405,64 @@ function RoomInner({
     const editor = editorRef.current
     if (!editor) return
     if (syncStatus !== 'synchronized') return
+    if (!shapesMap) return
 
     const desired = new Map<string, any>()
     for (const chg of pendingChanges) {
+      const requestedByColor =
+        typeof chg.requestedByColor === 'string' && chg.requestedByColor.trim()
+          ? chg.requestedByColor.trim()
+          : '#8B5CF6'
       for (const op of chg.operations) {
-        if (op.op !== 'add_shape' || !op.shape) continue
-        if (!['geo', 'arrow', 'note', 'text', 'frame', 'line', 'draw', 'group'].includes(op.shape.type))
+        const baseShape =
+          op.op === 'add_shape' && op.shape
+            ? op.shape
+            : op.op === 'update_shape' && op.shapeId && op.updates
+              ? (() => {
+                  const current = shapesMap.get(op.shapeId)
+                  if (!current) return null
+                  const next: any = { ...current, ...op.updates }
+                  if (op.updates.props && typeof op.updates.props === 'object') {
+                    next.props = { ...(current as any).props, ...(op.updates as any).props }
+                  }
+                  if (op.updates.meta && typeof op.updates.meta === 'object') {
+                    next.meta = { ...(current as any).meta, ...(op.updates as any).meta }
+                  }
+                  return next as CanvasShape
+                })()
+              : null
+
+        if (!baseShape) continue
+        if (!['geo', 'arrow', 'note', 'text', 'frame', 'line', 'draw', 'group'].includes(baseShape.type))
           continue
-        const baseId = op.shape.id.replace(/^shape:/, '')
+
+        const baseId = String((op.op === 'update_shape' ? op.shapeId : baseShape.id) ?? '').replace(/^shape:/, '')
         const ghostId = `shape:ghost-${chg.id}-${baseId}`
         const ghostShapeBase = normalizeCanvasShape({
-          ...op.shape,
+          ...baseShape,
           id: ghostId,
-          opacity: 0.8,
+          opacity: 0.35,
           isLocked: true,
-          meta: { ...(op.shape.meta ?? {}), ghost: true, pendingChangeId: chg.id },
+          meta: {
+            ...(baseShape.meta ?? {}),
+            ghost: true,
+            isPending: true,
+            pendingChangeId: chg.id,
+            requestedByColor,
+          },
         })
-        const ghostShape =
-          ghostShapeBase.type === 'geo'
-            ? ({
-                ...ghostShapeBase,
-                props: {
-                  ...(ghostShapeBase.props ?? {}),
-                  dash: 'dashed',
-                  fill: 'none',
-                  color: 'light-violet',
-                  labelColor: 'violet',
-                },
-              } satisfies CanvasShape)
-            : ghostShapeBase.type === 'arrow'
-              ? ({
-                  ...ghostShapeBase,
-                  props: {
-                    ...(ghostShapeBase.props ?? {}),
-                    dash: 'dashed',
-                    color: 'violet',
-                  },
-                } satisfies CanvasShape)
-              : ghostShapeBase
+        const ghostProps: any =
+          ghostShapeBase.props && typeof ghostShapeBase.props === 'object' ? { ...(ghostShapeBase.props as any) } : ghostShapeBase.props
+        const tlColor = tlColorFromUserColor(requestedByColor)
+        if (ghostProps && typeof ghostProps === 'object') {
+          if ('color' in ghostProps) ghostProps.color = tlColor
+          if ('labelColor' in ghostProps) ghostProps.labelColor = tlColor
+          if ('dash' in ghostProps) ghostProps.dash = 'dashed'
+        }
+        const ghostShape = {
+          ...ghostShapeBase,
+          props: ghostProps,
+        } as CanvasShape
         desired.set(ghostId, ghostShape)
       }
     }
@@ -1056,7 +1491,7 @@ function RoomInner({
     }
 
     for (const id of toRemove) existing.delete(id)
-  }, [pendingChanges, syncStatus])
+  }, [pendingChanges, syncStatus, shapesMap])
 
   const scheduleAutocomplete = () => {
     const editor = editorRef.current
@@ -1068,12 +1503,16 @@ function RoomInner({
       if (!editorNow) return
       if (!isStorageLoaded) return
       if (isThinkingRef.current) return
-      if (awaitingBackendChangeRef.current) return
+      const autocompleteOwnerId = autocompleteOwnerIdRef.current
+      const awaiting = awaitingBackendChangeRef.current
+      if (awaiting) {
+        if (Date.now() - awaiting.requestedAt <= AWAITING_BACKEND_TTL_MS) return
+        setAwaitingBackendChange((current) => (current?.id === awaiting.id ? null : current))
+      }
       if (pendingChangesRef.current.some((c) => c.status === 'pending')) return
+      if (!acquireAutocompleteLease(autocompleteOwnerId)) return
 
       const snapshot = buildSnapshot(editorNow)
-      if (snapshot.shapes.length < 2) return
-      if (Date.now() - lastAutocompleteRef.current <= 30_000) return
 
       isThinkingRef.current = true
       setIsThinkingUi(true)
@@ -1097,7 +1536,7 @@ function RoomInner({
                 x: cmd.x,
                 y: cmd.y,
                 rotation: 0,
-                index: `a${Date.now().toString(36)}${idx}`,
+                index: nextIndexKey(),
                 parentId: 'page:page',
                 isLocked: false,
                 opacity: 1,
@@ -1134,8 +1573,12 @@ function RoomInner({
           })
           putPendingChange({
             id: changeId,
-            agentId: 'agent-0',
+            agentId: systemAgentId,
             status: 'pending',
+            requestedByColor:
+              typeof self?.presence?.color === 'string' && self.presence.color.trim()
+                ? self.presence.color.trim()
+                : undefined,
             operations,
             reasoning: '',
             createdAt: now,
@@ -1148,12 +1591,14 @@ function RoomInner({
             id: res.changeId,
             operationsCount: res.operationsCount ?? 0,
             reasoning: res.reasoning ?? '',
+            requestedAt: Date.now(),
           })
           // Do not write system chat messages here; system chat is reserved for user [edit] prompts.
         }
       } catch (e: any) {
         console.warn('Autocomplete failed:', e)
       } finally {
+        releaseAutocompleteLease(autocompleteOwnerId)
         isThinkingRef.current = false
         setIsThinkingUi(false)
       }
@@ -1179,12 +1624,14 @@ function RoomInner({
         maxNewShapes: 2,
       })
       if (res.commands.length > 0) {
+        suppressAutocompleteUntilRef.current = Date.now() + 4_000
         applyCommandsToEditor(editorNow, res.commands)
       } else if (res.changeId) {
         setAwaitingBackendChange({
           id: res.changeId,
           operationsCount: res.operationsCount ?? 0,
           reasoning: res.reasoning ?? '',
+          requestedAt: Date.now(),
         })
         // Do not write system chat messages here; system chat is reserved for user [edit] prompts.
       }
@@ -1198,34 +1645,82 @@ function RoomInner({
 
   const onMount = (editor: Editor) => {
     editorRef.current = editor
+    editor.user.updateUserPreferences({ areKeyboardShortcutsEnabled: true })
+    editor.focus()
 
     const unsubscribe = editor.store.listen(
       (entry) => {
         syncEditorDiffToStorage(entry.changes as RecordsDiff<UnknownRecord>)
-        scheduleAutocomplete()
+        if (Date.now() < suppressAutocompleteUntilRef.current) return
+        if (shouldTriggerAutocompleteFromDiff(entry.changes as RecordsDiff<UnknownRecord>)) {
+          scheduleAutocomplete()
+        }
       },
       { source: 'user', scope: 'document' },
     )
-
-    scheduleAutocomplete()
 
     return () => {
       unsubscribe()
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current)
       idleTimerRef.current = null
-      if (fakeAgentReplyTimerRef.current) clearTimeout(fakeAgentReplyTimerRef.current)
-      fakeAgentReplyTimerRef.current = null
     }
   }
 
   useEffect(() => {
-    // Autocomplete is scheduled on user edits; initial room content often arrives via remote sync.
-    // Kick scheduling once storage is synchronized and we have some shapes.
-    if (!isStorageLoaded) return
-    if (!editorRef.current) return
-    if (shapesCount < 2) return
-    scheduleAutocomplete()
-  }, [isStorageLoaded, shapesCount])
+    const isEditableTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false
+      const tag = target.tagName.toLowerCase()
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
+      if (target.isContentEditable) return true
+      return false
+    }
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target instanceof HTMLElement ? e.target : null
+      const editable = isEditableTarget(target)
+      const insideCanvas = !!(target && canvasHostRef.current?.contains(target))
+      if (editable && !insideCanvas) return
+      const editor = editorRef.current
+      if (!editor) return
+
+      const accel = e.metaKey || e.ctrlKey
+      if (!accel) return
+      const key = e.key.toLowerCase()
+      const code = e.code
+
+      const isCopy = key === 'c' || code === 'KeyC'
+      const isCut = key === 'x' || code === 'KeyX'
+      const isPaste = key === 'v' || code === 'KeyV'
+
+      if (isCopy || isCut) {
+        const selected = editor.getSelectedShapeIds()
+        if (selected.length === 0) return
+        const content = editor.getContentFromCurrentPage(selected as any)
+        if (!content) return
+        localClipboardRef.current = content
+        if (isCut) {
+          editor.deleteShapes(selected as any)
+        }
+        e.preventDefault()
+        e.stopPropagation()
+        return
+      }
+
+      if (isPaste) {
+        if (!localClipboardRef.current) return
+        e.preventDefault()
+        e.stopPropagation()
+        editor.putContentOntoCurrentPage(localClipboardRef.current, {
+          preserveIds: false,
+          preservePosition: false,
+          select: true,
+        } as any)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
+  }, [])
 
   // Live cursors via Liveblocks presence.
   const handlePointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -1269,18 +1764,35 @@ function RoomInner({
     agentId === 'agent-0' || agentId.startsWith('agent_0') || agentId.startsWith('agent0')
 
   const displayAgentName = (agentId: string) => {
-    if (isAgent0(agentId)) return 'System'
+    if (agentId === systemAgentId || isAgent0(agentId)) return 'System'
+    return agents.find((a) => a.id === agentId)?.name ?? 'Agent'
+  }
+
+  const displayChatAgentName = (agentId: string) => {
+    if (agentId === systemAgentId || isAgent0(agentId)) return 'System'
     return agents.find((a) => a.id === agentId)?.name ?? 'Agent'
   }
 
   const toBackendAgentId = (agentId: string) => {
-    if (isAgent0(agentId)) return defaultBackendAgentIdRef.current ?? 'agent_0'
+    if (agentId === systemAgentId || isAgent0(agentId)) return defaultBackendAgentIdRef.current ?? agentId
     return agentId
   }
 
   const agent0Pending = useMemo(() => {
     return pendingChanges.filter((c) => isAgent0(String(c.agentId)) && c.status === 'pending')
   }, [pendingChanges])
+
+  const pendingForActiveAgent = useMemo(() => {
+    const localId = activeAgentId
+    const backendId = toBackendAgentId(localId)
+    return pendingChanges.filter((c) => {
+      const changeAgentId = String(c.agentId)
+      if (localId === systemAgentId) return changeAgentId === backendId || isAgent0(changeAgentId)
+      return changeAgentId === backendId
+    })
+  }, [activeAgentId, pendingChanges])
+
+  const activePendingForActiveAgent = pendingForActiveAgent[0] ?? null
   const activePendingChange =
     agent0Pending[0] ??
     (awaitingBackendChange
@@ -1294,6 +1806,12 @@ function RoomInner({
         } satisfies PendingChange)
       : null)
   const [editingChangeId, setEditingChangeId] = useState<string | null>(null)
+  const requestedByColorForPill =
+    (activePendingChange?.requestedByColor && activePendingChange.requestedByColor.trim()
+      ? activePendingChange.requestedByColor.trim()
+      : pendingChanges[0]?.requestedByColor && pendingChanges[0].requestedByColor.trim()
+        ? pendingChanges[0].requestedByColor.trim()
+        : '#8B5CF6') || '#8B5CF6'
 
   const clearAwaitingBackendChangeIfMatches = (changeId: string) => {
     setAwaitingBackendChange((cur) => (cur?.id === changeId ? null : cur))
@@ -1310,6 +1828,26 @@ function RoomInner({
   const acceptPendingChange = async () => {
     if (!activePendingChange) return
     if (activePendingChange.operations.length > 0) {
+      suppressAutocompleteUntilRef.current = Date.now() + 4_000
+      const editor = editorRef.current
+      if (editor) {
+        const ghostIds = activePendingChange.operations
+          .map((op) => {
+            const baseId = String((op.op === 'update_shape' ? op.shapeId : op.shape?.id) ?? '')
+              .replace(/^shape:/, '')
+              .trim()
+            if (!baseId) return null
+            if (op.op !== 'add_shape' && op.op !== 'update_shape') return null
+            return `shape:ghost-${activePendingChange.id}-${baseId}`
+          })
+          .filter(Boolean) as string[]
+        if (ghostIds.length > 0) {
+          editor.store.mergeRemoteChanges(() => {
+            editor.store.remove(ghostIds as any)
+          })
+        }
+        applyPendingOperationsToEditor(editor, activePendingChange)
+      }
       applyPendingOperationsToStorage(activePendingChange)
       return
     }
@@ -1326,6 +1864,24 @@ function RoomInner({
   const rejectPendingChange = async () => {
     if (!activePendingChange) return
     if (activePendingChange.operations.length > 0) {
+      const editor = editorRef.current
+      if (editor) {
+        const ghostIds = activePendingChange.operations
+          .map((op) => {
+            const baseId = String((op.op === 'update_shape' ? op.shapeId : op.shape?.id) ?? '')
+              .replace(/^shape:/, '')
+              .trim()
+            if (!baseId) return null
+            if (op.op !== 'add_shape' && op.op !== 'update_shape') return null
+            return `shape:ghost-${activePendingChange.id}-${baseId}`
+          })
+          .filter(Boolean) as string[]
+        if (ghostIds.length > 0) {
+          editor.store.mergeRemoteChanges(() => {
+            editor.store.remove(ghostIds as any)
+          })
+        }
+      }
       deletePendingChange(activePendingChange.id)
       return
     }
@@ -1339,10 +1895,60 @@ function RoomInner({
     }
   }
 
-  const triggerEditFlow = () => {
+  const acceptPendingChangeForAgent = async (change: PendingChange) => {
+    if (!change) return
+    if (change.operations.length > 0) {
+      suppressAutocompleteUntilRef.current = Date.now() + 4_000
+      const editor = editorRef.current
+      if (editor) applyPendingOperationsToEditor(editor, change)
+      applyPendingOperationsToStorage(change)
+      return
+    }
+    setIsThinkingUi(true)
+    try {
+      await completeAction({ roomId, changeId: change.id, action: 'approve' })
+      deletePendingChange(change.id)
+      clearAwaitingBackendChangeIfMatches(change.id)
+    } finally {
+      setIsThinkingUi(false)
+    }
+  }
+
+  const rejectPendingChangeForAgent = async (change: PendingChange) => {
+    if (!change) return
+    if (change.operations.length > 0) {
+      deletePendingChange(change.id)
+      return
+    }
+    setIsThinkingUi(true)
+    try {
+      await completeAction({ roomId, changeId: change.id, action: 'reject' })
+      deletePendingChange(change.id)
+      clearAwaitingBackendChangeIfMatches(change.id)
+    } finally {
+      setIsThinkingUi(false)
+    }
+  }
+
+  const triggerEditFlowForChange = (change: PendingChange, seed?: string) => {
+    if (!change) return
+    setEditingChangeId(change.id)
+    const changeAgentId = String(change.agentId)
+    if (isAgent0(changeAgentId)) {
+      setActiveAgentId('agent-0')
+    } else {
+      setActiveAgentId(changeAgentId)
+    }
+    const trimmedSeed = typeof seed === 'string' ? seed.trim() : ''
+    setChatInputValue(trimmedSeed ? `[edit] ${trimmedSeed}` : '[edit] ')
+    focusChatInput()
+  }
+
+  const triggerEditFlow = (seed?: string) => {
     if (activePendingChange) setEditingChangeId(activePendingChange.id)
-    setActiveAgentId('agent-0')
-    setChatInputValue('[edit] ')
+    setActiveAgentId(systemAgentId)
+    const trimmedSeed = typeof seed === 'string' ? seed.trim() : ''
+    setChatInputValue(trimmedSeed ? `[edit] ${trimmedSeed}` : '[edit] ')
     focusChatInput()
   }
 
@@ -1354,6 +1960,7 @@ function RoomInner({
     const trimmedStart = trimmed.trimStart()
     const isDeepResearchCommand = trimmedStart === '/deep-research' || trimmedStart.startsWith('/deep-research ')
     const isSkillResearchCommand = trimmedStart === '/skill-research' || trimmedStart.startsWith('/skill-research ')
+    const isEditCommand = trimmedStart === '/edit' || trimmedStart.startsWith('/edit ')
     const isCommand = isDeepResearchCommand || isSkillResearchCommand
     const commandlessPrompt = isCommand ? trimmedStart.replace(/^\/(deep-research|skill-research)\s*/i, '') : trimmed
     const authorKey = self?.id ? String(self.id) : 'self'
@@ -1362,9 +1969,6 @@ function RoomInner({
         ? self.presence.name.trim()
         : 'User'
     const isEditPrompt = trimmedStart.startsWith('[edit]')
-
-    // System chat (agent-0) is reserved ONLY for user edit prompts.
-    if (agentId === 'agent-0' && !isEditPrompt) return
 
     appendChatMessage({
       id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
@@ -1377,16 +1981,30 @@ function RoomInner({
       deepResearch: isDeepResearchCommand ? true : undefined,
     })
 
-    // System chat stores only user edit prompts; no agent execution from here.
-    if (agentId === 'agent-0') {
-      setChatInputValue('')
-      setSlashMenuDismissed(false)
+    if (isEditCommand) {
+      const seed = trimmedStart.replace(/^\/edit\s*/i, '')
+      const change = activePendingForActiveAgent ?? null
+      if (change) {
+        triggerEditFlowForChange(change, seed)
+      } else {
+        appendChatMessage({
+          id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
+          agentId,
+          role: 'agent',
+          authorKey: agentId,
+          authorName: displayChatAgentName(agentId),
+          content: 'No pending suggestion to edit for this agent.',
+          createdAt: new Date().toISOString(),
+        })
+        focusChatInput()
+      }
+      setSlashMenuDismissed(true)
       setSlashMenuIndex(0)
       return
     }
 
     // If this is an edit prompt for the active pending change, call completeAction(edit).
-    if (editingChangeId && agentId === 'agent-0' && isEditPrompt) {
+    if (editingChangeId && isEditPrompt) {
       ;(async () => {
         try {
           const res = await completeAction({
@@ -1398,16 +2016,7 @@ function RoomInner({
           deletePendingChange(editingChangeId)
           clearAwaitingBackendChangeIfMatches(editingChangeId)
           setEditingChangeId(null)
-          if (res.newChangeId) {
-            putPendingChange({
-              id: res.newChangeId,
-              agentId: 'agent-0',
-              status: 'pending',
-              operations: [],
-              reasoning: '',
-              createdAt: new Date().toISOString(),
-            })
-          }
+          // Backend is expected to write the new PendingChange into Liveblocks storage.
         } catch (e: any) {
           console.warn('Edit failed:', e)
         }
@@ -1416,98 +2025,78 @@ function RoomInner({
       return
     }
 
-    // If API is available, run the agent backend-side; otherwise fallback to mock reply.
-    if (agentApiEnabled()) {
-      setIsThinkingUi(true)
-      ;(async () => {
-        try {
-          const backendAgentId = toBackendAgentId(agentId)
-          const res = await apiRunAgent(backendAgentId, {
-            room_id: roomId,
-            prompt: commandlessPrompt,
-            mode: isDeepResearchCommand || isSkillResearchCommand ? 'query' : 'generate',
-          })
-
-          const agentName = displayAgentName(agentId)
-
-          if (res.answer && res.answer.trim()) {
-            appendChatMessage({
-              id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
-              agentId,
-              role: 'agent',
-              authorKey: agentId,
-              authorName: agentName,
-              content: res.answer.trim(),
-              createdAt: new Date().toISOString(),
-              deepResearch: isDeepResearchCommand ? true : undefined,
-            })
-          }
-
-          if (res.change_id) {
-            setAwaitingBackendChange({
-              id: res.change_id,
-              operationsCount: res.operations_count ?? 0,
-              reasoning: res.reasoning ?? '',
-            })
-            appendChatMessage({
-              id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
-              agentId,
-              role: 'agent',
-              authorKey: agentId,
-              authorName: agentName,
-              content: `Proposed canvas change: ${res.change_id}`,
-              createdAt: new Date().toISOString(),
-            })
-          } else if (res.reasoning && res.reasoning.trim() && (!res.answer || !res.answer.trim())) {
-            appendChatMessage({
-              id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
-              agentId,
-              role: 'agent',
-              authorKey: agentId,
-              authorName: agentName,
-              content: res.reasoning.trim(),
-              createdAt: new Date().toISOString(),
-              deepResearch: isDeepResearchCommand ? true : undefined,
-            })
-          }
-        } catch (e: any) {
-          // Avoid writing synthetic system messages. Errors can still be shown in console.
-          if (agentId !== 'agent-0') {
-            appendChatMessage({
-              id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
-              agentId,
-              role: 'agent',
-              authorKey: agentId,
-              authorName: displayAgentName(agentId),
-              content: `Agent run failed: ${String(e?.message ?? e)}`,
-              createdAt: new Date().toISOString(),
-            })
-          } else {
-            console.warn('System agent run failed:', e)
-          }
-        } finally {
-          setIsThinkingUi(false)
-        }
-      })()
-    } else {
-      if (fakeAgentReplyTimerRef.current) clearTimeout(fakeAgentReplyTimerRef.current)
-      const agentName = displayAgentName(agentId)
-      const deep = isDeepResearchCommand || isSkillResearchCommand
-      fakeAgentReplyTimerRef.current = setTimeout(() => {
-        appendChatMessage({
-          id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
-          agentId,
-          role: 'agent',
-          authorKey: agentId,
-          authorName: agentName,
-          content: deep
-            ? `Starting deep research… I’ll respond with a tighter plan and findings.`
-            : `Got it — I’m on it.`,
-          createdAt: new Date().toISOString(),
-          deepResearch: deep ? true : undefined,
+    setIsThinkingUi(true)
+    ;(async () => {
+      try {
+        const backendAgentId = toBackendAgentId(agentId)
+        const res = await apiRunAgent(backendAgentId, {
+          room_id: roomId,
+          prompt: commandlessPrompt,
+          mode: isDeepResearchCommand || isSkillResearchCommand ? 'query' : 'generate',
         })
-      }, deep ? 2400 : 900)
-    }
+
+        const agentName = displayChatAgentName(agentId)
+
+        if (res.answer && res.answer.trim()) {
+          appendChatMessage({
+            id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
+            agentId,
+            role: 'agent',
+            authorKey: agentId,
+            authorName: agentName,
+            content: res.answer.trim(),
+            createdAt: new Date().toISOString(),
+            deepResearch: isDeepResearchCommand ? true : undefined,
+          })
+        }
+
+        if (res.change_id) {
+          setAwaitingBackendChange({
+            id: res.change_id,
+            operationsCount: res.operations_count ?? 0,
+            reasoning: res.reasoning ?? '',
+            requestedAt: Date.now(),
+          })
+          appendChatMessage({
+            id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
+            agentId,
+            role: 'agent',
+            authorKey: agentId,
+            authorName: agentName,
+            content: `Proposed canvas change: ${res.change_id}`,
+            createdAt: new Date().toISOString(),
+          })
+        } else if (res.reasoning && res.reasoning.trim() && (!res.answer || !res.answer.trim())) {
+          appendChatMessage({
+            id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
+            agentId,
+            role: 'agent',
+            authorKey: agentId,
+            authorName: agentName,
+            content: res.reasoning.trim(),
+            createdAt: new Date().toISOString(),
+            deepResearch: isDeepResearchCommand ? true : undefined,
+          })
+        }
+      } catch (e: any) {
+        // Avoid writing synthetic system messages. Errors can still be shown in console.
+        if (agentId !== systemAgentId) {
+          appendChatMessage({
+            id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
+            agentId,
+            role: 'agent',
+            authorKey: agentId,
+            authorName: displayChatAgentName(agentId),
+            content: `Agent run failed: ${String(e?.message ?? e)}`,
+            createdAt: new Date().toISOString(),
+          })
+        } else {
+          console.warn('System agent run failed:', e)
+        }
+      } finally {
+        setIsThinkingUi(false)
+      }
+    })()
 
     setChatInputValue('')
     setSlashMenuDismissed(false)
@@ -1516,60 +2105,40 @@ function RoomInner({
 
   const spawnAgent = () => {
     if (!isStorageLoaded) return
-    const defaultName = `Agent ${agents.filter((a) => a.id !== 'agent-0').length + 1}`
-    if (agentApiEnabled()) {
-      setIsThinkingUi(true)
-      ;(async () => {
-        try {
-          const res = await apiCreateAgent(roomId, { name: defaultName, type: 'chatbot' })
-          const id = res.agent.id
-          const name = res.agent.name || defaultName
-          upsertAgentWithChat({
-            agent: { id, name },
-            initialMessage: {
-              id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
-              role: 'agent',
-              authorKey: id,
-              authorName: name,
-              content: `Hi, I am ${name}. What should I do?`,
-              createdAt: new Date().toISOString(),
-            },
-          })
-          setActiveAgentId(id)
-          setChatInputValue('')
-          focusChatInput()
-        } catch (e: any) {
-          console.warn('Create agent failed:', e)
-        } finally {
-          setIsThinkingUi(false)
-        }
-      })()
-      return
-    }
-
-    const id = `agent-${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`
-    const name = defaultName
-    upsertAgentWithChat({
-      agent: { id, name },
-      initialMessage: {
-        id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
-        role: 'agent',
-        authorKey: id,
-        authorName: name,
-        content: `Hi, I am ${name}. What should I do?`,
-        createdAt: new Date().toISOString(),
-      },
-    })
-    setActiveAgentId(id)
-    setChatInputValue('')
-    focusChatInput()
+    const defaultName = `Agent ${agents.filter((a) => a.id !== systemAgentId).length + 1}`
+    setIsThinkingUi(true)
+    ;(async () => {
+      try {
+        const res = await apiCreateAgent(roomId, { name: defaultName, type: 'chatbot' })
+        const id = res.agent.id
+        const name = res.agent.name || defaultName
+        upsertAgentWithChat({
+          agent: { id, name },
+          initialMessage: {
+            id: `msg_${Date.now().toString(36)}_${Math.random().toString(16).slice(2)}`,
+            role: 'agent',
+            authorKey: id,
+            authorName: name,
+            content: `Hi, I am ${name}. What should I do?`,
+            createdAt: new Date().toISOString(),
+          },
+        })
+        setActiveAgentId(id)
+        setChatInputValue('')
+        focusChatInput()
+      } catch (e: any) {
+        console.warn('Create agent failed:', e)
+      } finally {
+        setIsThinkingUi(false)
+      }
+    })()
   }
 
   const removeAgent = (agentId: string) => {
-    if (agentId === 'agent-0') return
+    if (agentId === systemAgentId) return
     if (!isStorageLoaded) return
     removeAgentFromStorage(agentId)
-    setActiveAgentId('agent-0')
+    setActiveAgentId(systemAgentId)
   }
 
   const pendingChangeSummaries = useMemo(() => {
@@ -1621,6 +2190,7 @@ function RoomInner({
       [
         { id: '/deep-research', label: 'Run exhaustive analysis' },
         { id: '/skill-research', label: 'Analyze required competencies' },
+        { id: '/edit', label: 'Edit pending suggestion' },
       ] as const,
     [],
   )
@@ -1634,16 +2204,9 @@ function RoomInner({
     return items
   }, [chatInputValue, slashCommands])
 
-  const isSystemChat = activeAgentId === 'agent-0'
-  const systemChatLocked = isSystemChat && !editingChangeId
-
-  const visibleChatMessages = useMemo(() => {
-    if (!isSystemChat) return chatMessages
-    return chatMessages.filter((m) => m.role === 'user')
-  }, [chatMessages, isSystemChat])
+  const isSystemChat = activeAgentId === systemAgentId
 
   const slashMenuOpen =
-    !isSystemChat &&
     isStorageLoaded &&
     !slashMenuDismissed &&
     chatInputValue.trimStart().startsWith('/') &&
@@ -1691,44 +2254,44 @@ function RoomInner({
             &gt;
           </button>
 
-          <div style={{ marginTop: 'auto', paddingBottom: 10, display: 'grid', gap: 8 }}>
-            <button
-              type="button"
-              aria-label="Copy invite link"
-              onClick={copyInviteLink}
-              style={{
-                width: 28,
-                height: 28,
+            <div style={{ marginTop: 'auto', paddingBottom: 10, display: 'grid', gap: 8 }}>
+              <button
+                type="button"
+                aria-label="Share"
+                onClick={copyInviteLink}
+                style={{
+                  width: 28,
+                  height: 28,
                 borderRadius: 10,
                 border: '0.5px solid rgba(15, 23, 42, 0.10)',
                 background: '#ffffff',
                 color: '#334155',
                 fontWeight: 900,
                 cursor: 'pointer',
-              }}
-              title="Copy link"
-            >
-              ⧉
-            </button>
-            <button
-              type="button"
-              aria-label="Leave room"
-              onClick={() => navigate('/')}
-              style={{
-                width: 28,
-                height: 28,
+                }}
+                title="Share"
+              >
+                <ShareIcon />
+              </button>
+              <button
+                type="button"
+                aria-label="Exit"
+                onClick={() => navigate('/')}
+                style={{
+                  width: 28,
+                  height: 28,
                 borderRadius: 10,
                 border: '0.5px solid #fecaca',
                 background: 'transparent',
                 color: '#ef4444',
                 fontWeight: 900,
                 cursor: 'pointer',
-              }}
-              title="Leave"
-            >
-              ⇦
-            </button>
-          </div>
+                }}
+                title="Exit"
+              >
+                <ExitIcon />
+              </button>
+            </div>
         </div>
       ) : (
         <div
@@ -1750,11 +2313,11 @@ function RoomInner({
               padding: '0 12px 0 16px',
               borderBottom: '0.5px solid rgba(15, 23, 42, 0.10)',
               color: '#0f172a',
-              fontWeight: 700,
-              fontSize: 14,
+              fontWeight: 600,
+              fontSize: 15,
             }}
           >
-            <div>⚡ Brainstorm</div>
+            <div>Brainstorm</div>
             <button
               type="button"
               aria-label="Close sidebar"
@@ -1777,37 +2340,26 @@ function RoomInner({
           <div style={{ padding: 16 }}>
             <div
               style={{
-                color: '#94a3b8',
-                fontSize: 10,
-                textTransform: 'uppercase',
-                letterSpacing: '0.1em',
-              }}
-            >
-              Current room
-            </div>
-            <div
-              style={{
-                marginTop: 4,
                 color: '#0f172a',
-                fontSize: 13,
+                fontSize: 15,
+                fontWeight: 500,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}
-              title={roomId}
+              title={roomName}
             >
               {roomName}
             </div>
 
             <div style={{ marginTop: 12 }}>
-              <div style={{ color: '#94a3b8', fontSize: 10, textTransform: 'uppercase' }}>Online</div>
               <div
                 onMouseEnter={() => setIsUsersHover(true)}
                 onMouseLeave={() => setIsUsersHover(false)}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  marginTop: 8,
+                  marginTop: 10,
                   position: 'relative',
                 }}
               >
@@ -1850,8 +2402,8 @@ function RoomInner({
                     onMouseLeave={() => setHoveredUserKey((k) => (k === p.key ? null : k))}
                     title={p.isSelf ? `You${p.name ? ` — ${p.name}` : ''}` : p.name || 'User'}
                     style={{
-                      width: 24,
-                      height: 24,
+                      width: 28,
+                      height: 28,
                       borderRadius: '50%',
                       background: avatarBgColor(p.color),
                       color: 'white',
@@ -1865,18 +2417,18 @@ function RoomInner({
                     }}
                   >
                     {avatarLabel(p.name)}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        right: -1,
-                        bottom: -1,
-                        width: 8,
-                        height: 8,
-                        borderRadius: '50%',
-                        background: '#22c55e',
-                        border: '2px solid #ffffff',
-                      }}
-                    />
+            <div
+              style={{
+                position: 'absolute',
+                right: -1,
+                bottom: -1,
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: '#22c55e',
+                border: '2px solid #ffffff',
+              }}
+            />
                     {hoveredUserKey === p.key ? (
                       <div
                         style={{
@@ -1912,33 +2464,43 @@ function RoomInner({
                   onClick={copyInviteLink}
                   style={{
                     flex: 1,
-                    border: '0.5px solid rgba(15, 23, 42, 0.10)',
-                    background: '#ffffff',
+                    background: '#f8fafc',
+                    border: '0.5px solid #e2e8f0',
                     color: '#334155',
-                    borderRadius: 12,
-                    padding: '8px 10px',
-                    fontSize: 12,
-                    fontWeight: 800,
+                    borderRadius: 8,
+                    padding: '8px 14px',
+                    fontSize: 13,
+                    fontWeight: 500,
                     cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
                   }}
                 >
-                  Copy link
+                  <ShareIcon />
+                  Share
                 </button>
                 <button
                   type="button"
                   onClick={() => navigate('/')}
                   style={{
-                    border: '0.5px solid #fecaca',
                     background: 'transparent',
+                    border: '0.5px solid #fecaca',
                     color: '#ef4444',
-                    borderRadius: 12,
-                    padding: '8px 10px',
-                    fontSize: 12,
-                    fontWeight: 800,
+                    borderRadius: 8,
+                    padding: '8px 14px',
+                    fontSize: 13,
+                    fontWeight: 500,
                     cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
                   }}
                 >
-                  Leave
+                  <ExitIcon />
+                  Exit
                 </button>
               </div>
               {copyStatus !== 'idle' ? (
@@ -1950,21 +2512,124 @@ function RoomInner({
                       : ''}
                 </div>
               ) : null}
+              <div style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic', marginTop: 2 }}>
+                ✦ autocomplete active
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Center canvas */}
-      <div
-        style={{ flex: 1, position: 'relative', overflow: 'hidden' }}
+	      {/* Center canvas */}
+	      <div
+	        ref={canvasHostRef}
+	        style={{
+	          flex: 1,
+	          position: 'relative',
+	          overflow: 'hidden',
+          // Prevent the browser from handling touch gestures (scroll/zoom) so tldraw doesn't need
+          // to call preventDefault in passive touch listeners (Chrome logs warnings otherwise).
+          touchAction: 'none',
+          overscrollBehavior: 'none',
+        }}
         onPointerMove={handlePointerMove}
         onPointerLeave={handlePointerLeave}
-        onPointerDownCapture={() => {
-          editorRef.current?.focus()
-        }}
-      >
-        <Tldraw onMount={onMount} user={tldrawUser} overrides={tldrawUiOverrides as any} />
+	        onPointerDownCapture={() => {
+	          editorRef.current?.focus()
+	        }}
+		      >
+		        <button
+		          type="button"
+		          aria-label={rightSidebarOpen ? 'Hide agents panel' : 'Show agents panel'}
+		          onClick={() => setRightSidebarOpen((v) => !v)}
+		          style={{
+		            position: 'fixed',
+		            top: 12,
+		            right: rightSidebarOpen ? rightSidebarWidth + 12 : 12,
+		            zIndex: 1000,
+		            width: 38,
+		            height: 38,
+		            borderRadius: 12,
+		            background: '#ffffff',
+		            border: '0.5px solid rgba(15, 23, 42, 0.12)',
+		            boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)',
+		            color: rightSidebarOpen ? '#0f172a' : '#1d4ed8',
+		            cursor: 'pointer',
+		            display: 'flex',
+		            alignItems: 'center',
+		            justifyContent: 'center',
+		            pointerEvents: 'auto',
+		          }}
+		          title="Agents"
+		        >
+	          <AgentsPanelIcon open={rightSidebarOpen} />
+	        </button>
+
+	        <Tldraw onMount={onMount} user={tldrawUser} overrides={tldrawUiOverrides as any} />
+
+        {/* Pending suggestion pill */}
+        {pendingChanges.length > 0 ? (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 80,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              background: '#ffffff',
+              border: '0.5px solid #e2e8f0',
+              borderRadius: 20,
+              padding: '8px 16px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+              zIndex: 20,
+              pointerEvents: 'auto',
+            }}
+          >
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: requestedByColorForPill,
+              }}
+            />
+            <div style={{ color: '#334155', fontSize: 13, fontWeight: 700 }}>AI suggestion ready</div>
+            <button
+              type="button"
+              onClick={acceptPendingChange}
+              style={{
+                background: '#0f172a',
+                color: 'white',
+                border: 'none',
+                borderRadius: 8,
+                padding: '4px 12px',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Accept
+            </button>
+            <button
+              type="button"
+              onClick={rejectPendingChange}
+              style={{
+                background: 'transparent',
+                color: '#94a3b8',
+                border: 'none',
+                borderRadius: 8,
+                padding: '4px 8px',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
 
         {/* Live cursors */}
         {others.map((o) => {
@@ -2126,12 +2791,12 @@ function RoomInner({
                 }}
               >
                 ✕ No
-              </button>
-              <button
-                onClick={triggerEditFlow}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
+	              </button>
+	              <button
+	                onClick={() => triggerEditFlow()}
+	                style={{
+	                  border: 'none',
+	                  background: 'transparent',
                   borderRadius: 999,
                   padding: '6px 10px',
                   fontSize: 12,
@@ -2244,17 +2909,18 @@ function RoomInner({
       </div>
 
       {/* Multi-Agent Control Center */}
-      <div
-        style={{
-          width: rightSidebarWidth,
-          background: '#ffffff',
-          borderLeft: '0.5px solid rgba(15, 23, 42, 0.10)',
-          display: 'flex',
-          flexDirection: 'column',
-          flexShrink: 0,
-          position: 'relative',
-        }}
-      >
+      {rightSidebarOpen ? (
+        <div
+          style={{
+            width: rightSidebarWidth,
+            background: '#ffffff',
+            borderLeft: '0.5px solid rgba(15, 23, 42, 0.10)',
+            display: 'flex',
+            flexDirection: 'column',
+            flexShrink: 0,
+            position: 'relative',
+          }}
+        >
         {/* Resize handle */}
         <div
           onMouseDown={() => {
@@ -2276,10 +2942,29 @@ function RoomInner({
         {/* Top: Agent Dock */}
         <div style={{ padding: 12, borderBottom: '0.5px solid rgba(15, 23, 42, 0.10)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: '#334155', letterSpacing: 0.8 }}>
-              AGENTS
-            </div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: '#94a3b8' }}>Agents</div>
             <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              aria-label="Close agents panel"
+              onClick={() => setRightSidebarOpen(false)}
+              style={{
+                border: '0.5px solid rgba(15, 23, 42, 0.10)',
+                background: '#ffffff',
+                color: '#94a3b8',
+                borderRadius: 10,
+                width: 28,
+                height: 28,
+                cursor: 'pointer',
+                fontSize: 16,
+                lineHeight: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              ×
+            </button>
           </div>
 
           <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -2292,34 +2977,34 @@ function RoomInner({
                 paddingBottom: 4,
               }}
             >
-              {(() => {
-                const systemActive = activeAgentId === 'agent-0'
-                const baseTabStyle: Record<string, any> = {
-                  border: '0.5px solid rgba(15, 23, 42, 0.10)',
-                  padding: '8px 10px',
-                  fontSize: 12,
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }
-                return (
-                  <>
-                    <button
-                      onClick={() => setActiveAgentId('agent-0')}
-                      style={{
-                        ...baseTabStyle,
-                        background: systemActive ? '#0f172a' : '#f8fafc',
-                        color: systemActive ? '#ffffff' : '#64748b',
-                        borderBottom: systemActive ? 'none' : '0.5px solid rgba(15, 23, 42, 0.10)',
-                        borderRadius: systemActive ? '10px 10px 0 0' : 10,
-                      }}
-                    >
-                      System
-                    </button>
+	              {(() => {
+	                const systemActive = activeAgentId === systemAgentId
+	                const baseTabStyle: Record<string, any> = {
+	                  border: '0.5px solid rgba(15, 23, 42, 0.10)',
+	                  padding: '8px 10px',
+	                  fontSize: 12,
+	                  fontWeight: 800,
+	                  cursor: 'pointer',
+	                  whiteSpace: 'nowrap',
+	                }
+	                return (
+	                  <>
+		                    <button
+		                      onClick={() => setActiveAgentId(systemAgentId)}
+	                      style={{
+	                        ...baseTabStyle,
+	                        background: systemActive ? '#0f172a' : '#f8fafc',
+	                        color: systemActive ? '#ffffff' : '#64748b',
+	                        borderBottom: systemActive ? 'none' : '0.5px solid rgba(15, 23, 42, 0.10)',
+	                        borderRadius: systemActive ? '10px 10px 0 0' : 10,
+	                      }}
+		                    >
+		                      System
+		                    </button>
 
-                    {agents
-                      .filter((a) => a.id !== 'agent-0')
-                      .map((a) => {
+	                    {agents
+	                      .filter((a) => a.id !== systemAgentId)
+	                      .map((a) => {
                         const active = a.id === activeAgentId
                         return (
                           <div
@@ -2374,24 +3059,24 @@ function RoomInner({
               })()}
             </div>
 
-            <button
-              disabled={!isStorageLoaded}
-              onClick={spawnAgent}
-              style={{
-                border: '0.5px solid rgba(59, 130, 246, 0.40)',
-                background: isStorageLoaded ? '#ffffff' : '#f8fafc',
-                color: isStorageLoaded ? '#1d4ed8' : '#94a3b8',
-                borderRadius: 999,
-                padding: '8px 12px',
-                fontSize: 12,
-                fontWeight: 800,
-                cursor: isStorageLoaded ? 'pointer' : 'not-allowed',
-                whiteSpace: 'nowrap',
-                opacity: isStorageLoaded ? 1 : 0.8,
-              }}
-            >
-              + Spawn
-            </button>
+	            <button
+	              disabled={!isStorageLoaded}
+	              onClick={spawnAgent}
+	              style={{
+	                border: '0.5px solid rgba(59, 130, 246, 0.40)',
+	                background: isStorageLoaded ? '#ffffff' : '#f8fafc',
+	                color: isStorageLoaded ? '#1d4ed8' : '#94a3b8',
+	                borderRadius: 999,
+	                padding: '4px 10px',
+	                fontSize: 12,
+	                fontWeight: 800,
+	                cursor: isStorageLoaded ? 'pointer' : 'not-allowed',
+	                whiteSpace: 'nowrap',
+	                opacity: isStorageLoaded ? 1 : 0.8,
+	              }}
+	            >
+	              + New
+	            </button>
           </div>
         </div>
 
@@ -2407,7 +3092,80 @@ function RoomInner({
             gap: 10,
           }}
         >
-          {visibleChatMessages.length === 0 ? (
+          {activePendingForActiveAgent ? (
+            <div
+              style={{
+                background: '#ffffff',
+                border: '0.5px solid rgba(15, 23, 42, 0.10)',
+                borderRadius: 14,
+                padding: 12,
+                boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 900, color: '#0f172a' }}>
+                    Pending canvas change
+                  </div>
+                  <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
+                    {pendingForActiveAgent.length} pending · {displayAgentName(activeAgentId)}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => acceptPendingChangeForAgent(activePendingForActiveAgent)}
+                    style={{
+                      border: '0.5px solid rgba(34, 197, 94, 0.35)',
+                      background: '#ffffff',
+                      color: '#16a34a',
+                      borderRadius: 999,
+                      padding: '6px 10px',
+                      fontSize: 12,
+                      fontWeight: 900,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✓ Yes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => rejectPendingChangeForAgent(activePendingForActiveAgent)}
+                    style={{
+                      border: '0.5px solid rgba(239, 68, 68, 0.28)',
+                      background: 'transparent',
+                      color: '#ef4444',
+                      borderRadius: 999,
+                      padding: '6px 10px',
+                      fontSize: 12,
+                      fontWeight: 900,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✕ No
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => triggerEditFlowForChange(activePendingForActiveAgent)}
+                    style={{
+                      border: '0.5px solid rgba(15, 23, 42, 0.10)',
+                      background: '#f8fafc',
+                      color: '#334155',
+                      borderRadius: 999,
+                      padding: '6px 10px',
+                      fontSize: 12,
+                      fontWeight: 900,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✏️ Edit
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {chatMessages.length === 0 ? (
             <div
               style={{
                 marginTop: 12,
@@ -2419,10 +3177,11 @@ function RoomInner({
               No messages yet.
             </div>
           ) : (
-            visibleChatMessages.map((m) => {
+            chatMessages.map((m) => {
               const selfKey = self?.id ? String(self.id) : 'self'
               const isSelfMessage = m.role === 'user' && m.authorKey === selfKey
               const isAgent = m.role === 'agent'
+              const isEdit = isSystemChat && m.role === 'user' && m.content.trimStart().startsWith('[edit]')
               return (
                 <div
                   key={m.id}
@@ -2431,19 +3190,24 @@ function RoomInner({
                     justifyContent: isSelfMessage ? 'flex-end' : 'flex-start',
                   }}
                 >
-                  <div
-                    style={{
-                      maxWidth: '88%',
-                      background: isAgent ? 'rgba(224, 231, 255, 0.50)' : '#ffffff',
-                      border: '0.5px solid rgba(15, 23, 42, 0.10)',
-                      borderRadius: 14,
-                      padding: '10px 10px',
-                      color: '#0f172a',
-                      boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)',
-                      whiteSpace: 'pre-wrap',
-                      overflowWrap: 'anywhere',
-                    }}
-                  >
+	                  <div
+	                    style={{
+	                      maxWidth: '88%',
+	                      background: isAgent ? '#F5F3FF' : '#f8fafc',
+	                      border: isEdit
+	                        ? '0.5px solid rgba(99, 102, 241, 0.35)'
+	                        : isAgent
+	                          ? '0.5px solid rgba(76, 29, 149, 0.10)'
+	                          : '0.5px solid #e2e8f0',
+	                      borderRadius: 12,
+	                      padding: '10px 10px',
+	                      color: isAgent ? '#4c1d95' : '#334155',
+	                      boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)',
+	                      whiteSpace: 'pre-wrap',
+	                      overflowWrap: 'anywhere',
+	                      textAlign: m.role === 'user' ? 'right' : 'left',
+	                    }}
+	                  >
                     <div
                       style={{
                         display: 'flex',
@@ -2453,10 +3217,25 @@ function RoomInner({
                         marginBottom: 6,
                       }}
                     >
-                      <div style={{ fontSize: 11, fontWeight: 800, color: '#334155' }}>
-                        {m.authorName}
-                      </div>
-                      {m.deepResearch ? (
+	                      <div style={{ fontSize: 11, fontWeight: 800, color: isAgent ? '#4c1d95' : '#334155' }}>
+	                        {m.authorName}
+	                      </div>
+                      {isEdit ? (
+                        <div
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 900,
+                            color: '#4338ca',
+                            background: 'rgba(224, 231, 255, 0.70)',
+                            border: '0.5px solid rgba(99, 102, 241, 0.25)',
+                            padding: '2px 6px',
+                            borderRadius: 999,
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          EDIT
+                        </div>
+                      ) : m.deepResearch ? (
                         <div
                           style={{
                             fontSize: 10,
@@ -2473,8 +3252,8 @@ function RoomInner({
                         </div>
                       ) : null}
                     </div>
-                    <div style={{ fontSize: 13, lineHeight: '18px' }}>{m.content}</div>
-                  </div>
+	                    <div style={{ fontSize: 13, lineHeight: isAgent ? '1.6' : '18px' }}>{m.content}</div>
+	                  </div>
                 </div>
               )
             })
@@ -2541,7 +3320,7 @@ function RoomInner({
               ref={chatInputRef}
               value={chatInputValue}
               onChange={(e) => setChatInputValue(e.target.value)}
-              disabled={!isStorageLoaded || systemChatLocked}
+              disabled={!isStorageLoaded}
               onKeyDown={(e) => {
                 if (slashMenuOpen) {
                   if (e.key === 'ArrowDown') {
@@ -2573,16 +3352,12 @@ function RoomInner({
                 e.preventDefault()
                 sendChatMessage(chatInputValue)
               }}
-              placeholder={
-                systemChatLocked
-                  ? 'Use the Edit button to send an [edit] prompt…'
-                  : `Command ${displayAgentName(activeAgentId)}...`
-              }
+	              placeholder="Ask or instruct..."
               style={{
                 flex: 1,
                 background: '#f8fafc',
                 border: '0.5px solid rgba(15, 23, 42, 0.10)',
-                color: isStorageLoaded && !systemChatLocked ? '#0f172a' : '#94a3b8',
+                color: isStorageLoaded ? '#0f172a' : '#94a3b8',
                 borderRadius: 12,
                 padding: '10px 12px',
                 fontSize: 13,
@@ -2592,18 +3367,18 @@ function RoomInner({
             <button
               type="button"
               aria-label="Send"
-              disabled={!isStorageLoaded || systemChatLocked}
+              disabled={!isStorageLoaded}
               onClick={() => sendChatMessage(chatInputValue)}
               style={{
                 border: '0.5px solid rgba(15, 23, 42, 0.10)',
-                background: isStorageLoaded && !systemChatLocked ? '#ffffff' : '#f8fafc',
-                color: isStorageLoaded && !systemChatLocked ? '#0f172a' : '#94a3b8',
+                background: isStorageLoaded ? '#ffffff' : '#f8fafc',
+                color: isStorageLoaded ? '#0f172a' : '#94a3b8',
                 borderRadius: 12,
                 padding: '10px 12px',
                 fontSize: 13,
                 fontWeight: 900,
-                cursor: isStorageLoaded && !systemChatLocked ? 'pointer' : 'not-allowed',
-                opacity: isStorageLoaded && !systemChatLocked ? 1 : 0.8,
+                cursor: isStorageLoaded ? 'pointer' : 'not-allowed',
+                opacity: isStorageLoaded ? 1 : 0.8,
               }}
             >
               &gt;
@@ -2613,9 +3388,10 @@ function RoomInner({
           {/* Bottom actions moved to left sidebar */}
         </div>
       </div>
-    </div>
-  )
-}
+      ) : null}
+	    </div>
+	  )
+	}
 
 function HomeScreen({
   rooms,
@@ -2634,6 +3410,13 @@ function HomeScreen({
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [newRoomName, setNewRoomName] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filteredRooms = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return rooms
+    return rooms.filter((r) => `${r.name} ${r.id}`.toLowerCase().includes(q))
+  }, [rooms, searchQuery])
 
   return (
     <div className="h-screen w-screen bg-[#f8fafc] flex flex-col font-sans text-[#0f172a] overflow-hidden">
@@ -2644,8 +3427,13 @@ function HomeScreen({
         </div>
 
         <div className="hidden md:flex items-center justify-center">
-          <div className="bg-slate-50 border border-slate-200 rounded-full px-4 py-2 w-96 text-sm text-slate-400">
-            🔍 Поиск по доскам...
+          <div className="relative w-96">
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search boards..."
+              className="bg-slate-50 border border-slate-200 rounded-full px-4 py-2 w-full text-sm text-[#0f172a] placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+            />
           </div>
         </div>
 
@@ -2793,17 +3581,17 @@ function HomeScreen({
           </section>
 
           {/* Section B */}
-          <section>
-            <h2 className="text-xl font-bold mb-4">Recent Collaborative Boards</h2>
-            {rooms.length === 0 ? (
-              <div className="text-[#475569] text-sm">No recent sessions</div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {rooms.map((room) => (
-                  <div
-                    key={room.id}
-                    className="bg-white rounded-2xl border border-slate-200/60 shadow-sm flex flex-col overflow-hidden"
-                  >
+	          <section>
+	            <h2 className="text-xl font-bold mb-4">Recent Collaborative Boards</h2>
+	            {filteredRooms.length === 0 ? (
+	              <div className="text-[#475569] text-sm">No recent sessions</div>
+	            ) : (
+	              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+	                {filteredRooms.map((room) => (
+	                  <div
+	                    key={room.id}
+	                    className="bg-white rounded-2xl border border-slate-200/60 shadow-sm flex flex-col overflow-hidden"
+	                  >
                     <div className="h-32 bg-slate-50 border-b border-slate-100" />
                     <div className="p-4 flex flex-col gap-2">
                       <div className="truncate font-medium text-[#0f172a]" title={room.id}>

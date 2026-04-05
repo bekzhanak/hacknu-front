@@ -2,7 +2,6 @@ import type {
   AutocompleteRequest,
   AutocompleteResponse,
 } from './brainstormContract'
-import { mockAutocomplete } from './brainstormMock'
 import { config } from '../config'
 
 const API_BASE_URL = config.brainstormApiBaseUrl || undefined
@@ -46,8 +45,7 @@ export async function completeAction(params: {
 export async function autocomplete(
   req: AutocompleteRequest,
 ): Promise<AutocompleteResponse> {
-  // Until backend is live, always use a local mock unless an API base is provided.
-  if (!API_BASE_URL) return mockAutocomplete(req)
+  if (!API_BASE_URL) throw new Error('Missing VITE_BRAINSTORM_API_BASE_URL')
 
   const res = await fetch(`${API_BASE_URL}/complete`, {
     method: 'POST',
